@@ -15,6 +15,8 @@ mod graph;
 mod labeling_proof;
 #[cfg(feature = "multicore-sdr")]
 mod memory_handling;
+#[cfg(feature = "multicore-sdr")]
+mod numa;
 mod params;
 mod porep;
 mod proof;
