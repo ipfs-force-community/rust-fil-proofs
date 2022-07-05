@@ -33,3 +33,20 @@ rows_to_discard = 2
 
 # This enables multicore SDR replication
 use_multicore_sdr = false
+
+# The shared memory directory pattern.
+# default value: "filecoin-proof-label/numa_$NUMA_NODE_INDEX"
+# $NUMA_NODE_INDEX corresponds to the index of the numa node, 
+# and you should make sure that the shared memory files stored in this folder were created on that numa node ($NUMA_NODE_INDEX)
+# If using the default value will match the following shared memory files:
+# NUMA node 0:
+# /dev/shm/filecoin-proof-label/numa_0/MEM_32G_1
+# /dev/shm/filecoin-proof-label/numa_0/MEM_64G_1
+# /dev/shm/filecoin-proof-label/numa_0/ANY_FILE_NAME
+# NUMA node 1:
+# /dev/shm/filecoin-proof-label/numa_1/MEM_32G_1
+# /dev/shm/filecoin-proof-label/numa_1/MEM_64G_1
+# /dev/shm/filecoin-proof-label/numa_1/ANY_FILE_NAME
+# NUMA node N:
+# ...
+# multicore_sdr_shm_numa_dir_pattern = "filecoin-proof-label/numa_$NUMA_NODE_INDEX"
