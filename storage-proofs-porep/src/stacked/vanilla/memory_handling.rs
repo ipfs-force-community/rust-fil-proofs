@@ -414,7 +414,7 @@ fn numa_pool() -> &'static shm::NumaPool {
 /// /dev/shm/filecoin-proof-label/numa_1/any_file_name
 /// NUMA node N:
 /// ...
-fn scan_shm_files(shm_numa_dir_pattern: &ShmNumaDirPattern<'_>) -> Result<Vec<Vec<PathBuf>>> {
+fn scan_shm_files(shm_numa_dir_pattern: &ShmNumaDirPattern) -> Result<Vec<Vec<PathBuf>>> {
     use glob::glob;
     use regex::Regex;
 
@@ -530,9 +530,8 @@ mod tests {
                     numa_index.to_string().as_str(),
                     1,
                 );
-
                 expected_numa_shm_files[numa_index] =
-                    generated_random_files(tempdir.path().join(dir), count);
+                    generated_random_files(tempdir.path().join(dir.trim_matches('/')), count);
             }
             if expected_numa_shm_files.iter().all(Vec::is_empty) {
                 expected_numa_shm_files = Vec::new();
@@ -558,7 +557,7 @@ mod tests {
                 .map(char::from)
                 .take(len)
                 .collect()
-        };
+        }
 
         let mut rng = rand::thread_rng();
         let dir = dir.as_ref();

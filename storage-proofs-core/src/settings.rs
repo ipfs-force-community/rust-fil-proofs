@@ -105,31 +105,29 @@ impl Settings {
         s.try_into()
     }
 
-    pub fn multicore_sdr_shm_numa_dir_pattern<'a>(&self, prefix: &'a str) -> ShmNumaDirPattern<'a> {
+    pub fn multicore_sdr_shm_numa_dir_pattern<'a>(&self, prefix: &'a str) -> ShmNumaDirPattern {
         ShmNumaDirPattern::new(&self.multicore_sdr_shm_numa_dir_pattern, prefix)
     }
 }
 
 /// The shared memory directory pattern
-pub struct ShmNumaDirPattern<'a> {
-    pattern: String,
-    prefix: &'a str,
-}
+pub struct ShmNumaDirPattern(String);
 
-impl<'a> ShmNumaDirPattern<'a> {
+impl ShmNumaDirPattern {
     const NUMA_NODE_IDX_VAR_NAME: &'static str = "$NUMA_NODE_INDEX";
 
-    pub fn new(pattern: &str, prefix: &'a str) -> Self {
-        Self {
-            pattern: glob::Pattern::escape(pattern.trim_matches('/')),
-            prefix: prefix.trim_end_matches('/'),
-        }
+    pub fn new<'a>(pattern: &str, prefix: &'a str) -> Self {
+        Self(format!(
+            "{}/{}",
+            prefix.trim_end_matches('/'),
+            glob::Pattern::escape(pattern.trim_matches('/')),
+        ))
     }
 
     /// Converts to glob pattern
     ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use storage_proofs_core::settings::ShmNumaDirPattern;
     ///
@@ -141,16 +139,15 @@ impl<'a> ShmNumaDirPattern<'a> {
     /// ```
     pub fn to_glob_pattern(&self) -> String {
         format!(
-            "{}/{}/*",
-            self.prefix,
-            self.pattern.replacen(Self::NUMA_NODE_IDX_VAR_NAME, "*", 1)
+            "{}/*",
+            self.0.replacen(Self::NUMA_NODE_IDX_VAR_NAME, "*", 1)
         )
     }
 
     /// Converts to regex pattern
     ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use storage_proofs_core::settings::ShmNumaDirPattern;
     ///
@@ -162,10 +159,8 @@ impl<'a> ShmNumaDirPattern<'a> {
     /// ```
     pub fn to_regex_pattern(&self) -> String {
         format!(
-            "{}/{}/.+",
-            self.prefix,
-            self.pattern
-                .replacen(Self::NUMA_NODE_IDX_VAR_NAME, "(\\d+)", 1)
+            "{}/.+",
+            self.0.replacen(Self::NUMA_NODE_IDX_VAR_NAME, "(\\d+)", 1)
         )
     }
 }

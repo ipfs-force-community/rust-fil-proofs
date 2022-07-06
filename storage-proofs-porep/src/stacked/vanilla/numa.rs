@@ -11,6 +11,7 @@ use libc::c_int;
 pub struct NumaNodeIndex(u32);
 
 impl NumaNodeIndex {
+    #[allow(dead_code)]
     pub fn new(idx: u32) -> Self {
         Self(idx)
     }
