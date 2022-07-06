@@ -93,7 +93,7 @@ impl NumaPool {
             let mmap = Mutex::new(mmap);
             shm_pool
                 .entry(file_size as usize)
-                .or_insert_with(|| vec![])
+                .or_insert_with(Vec::new)
                 .push(mmap);
         }
         shm_pool
@@ -128,7 +128,7 @@ fn current_numa_node() -> Option<NumaNodeIndex> {
 
 #[cfg(test)]
 fn current_numa_node() -> Option<NumaNodeIndex> {
-    tests::CUR_NUMA_NODE.lock().unwrap().clone()
+    *tests::CUR_NUMA_NODE.lock().unwrap()
 }
 
 #[cfg(test)]

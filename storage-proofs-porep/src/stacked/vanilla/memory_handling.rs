@@ -438,7 +438,7 @@ fn scan_shm_files(shm_numa_dir_pattern: &ShmNumaDirPattern) -> Result<Vec<Vec<Pa
         .for_each(|(numa_node_idx, path)| {
             numa_shm_files_map
                 .entry(numa_node_idx)
-                .or_insert_with(|| Vec::new())
+                .or_insert_with(Vec::new)
                 .push(path);
         });
 
@@ -448,7 +448,7 @@ fn scan_shm_files(shm_numa_dir_pattern: &ShmNumaDirPattern) -> Result<Vec<Vec<Pa
         Some(&max_node_idx) => {
             let mut numa_vec = Vec::with_capacity(max_node_idx + 1);
             for i in 0..=max_node_idx {
-                numa_vec.push(numa_shm_files_map.remove(&i).unwrap_or_else(|| Vec::new()))
+                numa_vec.push(numa_shm_files_map.remove(&i).unwrap_or_default())
             }
             numa_vec
         }
@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_scan_shm_files() {
-        const NUMA_NODE_IDX_VAR_NAME: &'static str = "$NUMA_NODE_INDEX";
+        const NUMA_NODE_IDX_VAR_NAME: &str = "$NUMA_NODE_INDEX";
 
         struct TestCase {
             shm_numa_dir_pattern: String,

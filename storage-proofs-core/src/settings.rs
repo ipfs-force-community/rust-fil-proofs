@@ -105,7 +105,7 @@ impl Settings {
         s.try_into()
     }
 
-    pub fn multicore_sdr_shm_numa_dir_pattern<'a>(&self, prefix: &'a str) -> ShmNumaDirPattern {
+    pub fn multicore_sdr_shm_numa_dir_pattern(&self, prefix: &str) -> ShmNumaDirPattern {
         ShmNumaDirPattern::new(&self.multicore_sdr_shm_numa_dir_pattern, prefix)
     }
 }
@@ -116,7 +116,7 @@ pub struct ShmNumaDirPattern(String);
 impl ShmNumaDirPattern {
     const NUMA_NODE_IDX_VAR_NAME: &'static str = "$NUMA_NODE_INDEX";
 
-    pub fn new<'a>(pattern: &str, prefix: &'a str) -> Self {
+    pub fn new(pattern: &str, prefix: &str) -> Self {
         Self(format!(
             "{}/{}",
             prefix.trim_end_matches('/'),
