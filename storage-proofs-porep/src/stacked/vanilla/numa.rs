@@ -23,7 +23,7 @@ impl NumaNodeIndex {
 }
 
 #[cfg(target_os = "linux")]
-pub mod linux {
+mod linux {
 
     use lazy_static::lazy_static;
     use libc::{self, c_int};
