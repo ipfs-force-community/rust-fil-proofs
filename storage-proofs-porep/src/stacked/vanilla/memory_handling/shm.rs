@@ -101,7 +101,8 @@ impl NumaPool {
 
     /// Acquire the shm memory for the specified size
     ///
-    /// Acquire returns the memory of the NUMA node where the caller thread is located.
+    /// Acquire returns the shared memory of the NUMA node where the caller thread is located 
+    /// if there is enough shared memory.
     /// Make sure that the caller thread and the thread that using the memory returned
     /// by this function are in the same NUMA node and make sure the thread that using
     /// the returned memory will not be dispatched to other NUMA nodes, otherwise the
