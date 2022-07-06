@@ -102,9 +102,9 @@ impl NumaPool {
     /// Acquire the shm memory for the specified size
     ///
     /// Acquire returns the memory of the NUMA node where the caller thread is located.
-    /// Make sure that the caller thread and the thread that using the memory returned 
-    /// by this function are in the same NUMA node and make sure the thread that using 
-    /// the returned memory will not be dispatched to other NUMA nodes, otherwise the 
+    /// Make sure that the caller thread and the thread that using the memory returned
+    /// by this function are in the same NUMA node and make sure the thread that using
+    /// the returned memory will not be dispatched to other NUMA nodes, otherwise the
     /// performance of using returned memory will be very low
     pub fn acquire(&self, size: usize) -> Option<MutexGuard<'_, MmapMut>> {
         let numa_group = self
@@ -128,7 +128,7 @@ fn current_numa_node() -> Option<NumaNodeIndex> {
 
 #[cfg(test)]
 fn current_numa_node() -> Option<NumaNodeIndex> {
-    unsafe { tests::CUR_NUMA_NODE.lock().unwrap().clone() }
+    tests::CUR_NUMA_NODE.lock().unwrap().clone()
 }
 
 #[cfg(test)]
@@ -136,17 +136,19 @@ mod tests {
     use std::fs;
     use std::sync::Mutex;
 
+    use lazy_static::lazy_static;
+
     use crate::stacked::vanilla::numa::NumaNodeIndex;
 
     use super::NumaPool;
 
-    pub(super) static mut CUR_NUMA_NODE: Mutex<Option<NumaNodeIndex>> = Mutex::new(None);
+    lazy_static! {
+        pub(super) static ref CUR_NUMA_NODE: Mutex<Option<NumaNodeIndex>> = Mutex::new(None);
+    }
 
     /// set current numa node for testing
     fn set_current_numa_node(curr: Option<NumaNodeIndex>) {
-        unsafe {
-            *CUR_NUMA_NODE.lock().unwrap() = curr;
-        }
+        *CUR_NUMA_NODE.lock().unwrap() = curr;
     }
 
     #[test]
