@@ -1,16 +1,24 @@
 use std::cell::UnsafeCell;
+use std::collections::HashMap;
 use std::fs::File;
 use std::hint::spin_loop;
 use std::marker::{PhantomData, Sync};
-use std::mem::size_of;
-use std::path::Path;
+use std::mem::{size_of, MaybeUninit};
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
 use std::slice;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    MutexGuard, Once,
+};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use byte_slice_cast::{AsSliceOf, FromByteSlice};
-use log::{info, warn};
+use log::{debug, info, warn};
 use mapr::{Mmap, MmapMut, MmapOptions};
+use storage_proofs_core::settings::{ShmNumaDirPattern, SETTINGS};
+
+mod shm;
 
 pub struct CacheReader<T> {
     file: File,
@@ -275,7 +283,7 @@ impl<T: FromByteSlice> CacheReader<T> {
     }
 }
 
-fn allocate_layer(sector_size: usize) -> Result<MmapMut> {
+fn normal_allocate_layer(sector_size: usize) -> Result<MmapMut> {
     match MmapOptions::new()
         .len(sector_size)
         .private()
@@ -296,15 +304,277 @@ fn allocate_layer(sector_size: usize) -> Result<MmapMut> {
     }
 }
 
+#[derive(Debug)]
+pub enum Memory {
+    Normal(MmapMut),
+    Shm(MutexGuard<'static, MmapMut>),
+}
+
+impl Deref for Memory {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Memory::Normal(m) => m.deref(),
+            Memory::Shm(m) => m.deref(),
+        }
+    }
+}
+
+impl DerefMut for Memory {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Memory::Normal(m) => m.deref_mut(),
+            Memory::Shm(m) => m.deref_mut(),
+        }
+    }
+}
+
+impl AsRef<[u8]> for Memory {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.deref()
+    }
+}
+
+impl AsMut<[u8]> for Memory {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.deref_mut()
+    }
+}
+
+fn allocate_layer(sector_size: usize) -> Result<Memory> {
+    Ok(match numa_pool().acquire(sector_size) {
+        Some(shm_mem) => Memory::Shm(shm_mem),
+        None => {
+            debug!("unable to load shm memory, falling back.");
+            Memory::Normal(normal_allocate_layer(sector_size)?)
+        }
+    })
+}
+
 pub fn setup_create_label_memory(
     sector_size: usize,
     degree: usize,
     window_size: Option<usize>,
     cache_path: &Path,
-) -> Result<(CacheReader<u32>, MmapMut, MmapMut)> {
+) -> Result<(CacheReader<u32>, Memory, Memory)> {
     let parents_cache = CacheReader::new(cache_path, window_size, degree)?;
     let layer_labels = allocate_layer(sector_size)?;
     let exp_labels = allocate_layer(sector_size)?;
 
     Ok((parents_cache, layer_labels, exp_labels))
+}
+
+/// Get the static global NUMA pool reference
+fn numa_pool() -> &'static shm::NumaPool {
+    fn init_numa_pool() -> Result<shm::NumaPool> {
+        let shm_numa_dir_pattern = SETTINGS.multicore_sdr_shm_numa_dir_pattern("/dev/shm");
+
+        Ok(shm::NumaPool::new(scan_shm_files(&shm_numa_dir_pattern)?))
+    }
+
+    static mut NUMA_POOL: MaybeUninit<shm::NumaPool> = MaybeUninit::uninit();
+    static INIT: Once = Once::new();
+
+    INIT.call_once(|| {
+        let numa_pool = match init_numa_pool() {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("init numa pool: {:?}", e);
+                shm::NumaPool::empty()
+            }
+        };
+
+        unsafe { NUMA_POOL = MaybeUninit::new(numa_pool) }
+    });
+
+    unsafe { NUMA_POOL.assume_init_ref() }
+}
+
+/// Scan SHM files by the given `shm_numa_dir_pattern`
+///
+/// let p = ShmNumaDirPattern::new("/dev/shm/filecoin-proof-label/numa_$NUMA_NODE_INDEX", "/dev/shm");
+/// scan_shm_files(&p);
+///
+/// $NUMA_NODE_INDEX corresponds to the index of the numa node,
+/// and you should make sure that the shared memory files stored in this folder were created on that numa node ($NUMA_NODE_INDEX)
+/// In the above example, the following shared memory files will be matched.
+///
+/// NUMA node 0:
+/// /dev/shm/filecoin-proof-label/numa_0/mem_32GiB_1
+/// /dev/shm/filecoin-proof-label/numa_0/mem_64GiB_1
+/// /dev/shm/filecoin-proof-label/numa_0/any_file_name
+/// NUMA node 1:
+/// /dev/shm/filecoin-proof-label/numa_1/mem_32GiB_1
+/// /dev/shm/filecoin-proof-label/numa_1/mem_64GiB_1
+/// /dev/shm/filecoin-proof-label/numa_1/any_file_name
+/// NUMA node N:
+/// ...
+fn scan_shm_files(shm_numa_dir_pattern: &ShmNumaDirPattern) -> Result<Vec<Vec<PathBuf>>> {
+    use glob::glob;
+    use regex::Regex;
+
+    let re_numa_node_idx = Regex::new(shm_numa_dir_pattern.to_regex_pattern().as_str())
+        .context("invalid `multicore_sdr_shm_numa_dir_pattern`")?;
+
+    // numa_shm_files_map: { NUMA_NODE_INDEX -> Vec<PathBuf of this numa node shm file> }
+    let mut numa_shm_files_map = HashMap::new();
+    glob(shm_numa_dir_pattern.to_glob_pattern().as_str())
+        .context("invalid `multicore_sdr_shm_numa_dir_pattern`")?
+        .filter_map(|path_res| path_res.ok())
+        .filter_map(|path| {
+            let numa_node_idx: usize = re_numa_node_idx
+                .captures(path.to_str()?)?
+                .get(1)?
+                .as_str()
+                .parse()
+                .ok()?;
+            Some((numa_node_idx, path))
+        })
+        .for_each(|(numa_node_idx, path)| {
+            numa_shm_files_map
+                .entry(numa_node_idx)
+                .or_insert_with(Vec::new)
+                .push(path);
+        });
+
+    // Converts the numa_shm_files_map { NUMA_NODE_INDEX -> Vec<PathBuf of this numa node shm file> }
+    // to numa_shm_files Vec [ NUMA_NODE_INDEX -> Vec<PathBuf of this numa node shm file> ]
+    let numa_shm_files = match numa_shm_files_map.keys().max() {
+        Some(&max_node_idx) => {
+            let mut numa_vec = Vec::with_capacity(max_node_idx + 1);
+            for i in 0..=max_node_idx {
+                numa_vec.push(numa_shm_files_map.remove(&i).unwrap_or_default())
+            }
+            numa_vec
+        }
+        None => Vec::new(),
+    };
+    Ok(numa_shm_files)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        fs,
+        iter::repeat,
+        path::{Path, PathBuf},
+    };
+
+    use rand::{distributions::Alphanumeric, prelude::ThreadRng, Rng};
+    use storage_proofs_core::settings::ShmNumaDirPattern;
+
+    use crate::stacked::vanilla::memory_handling::scan_shm_files;
+
+    #[test]
+    fn test_scan_shm_files() {
+        const NUMA_NODE_IDX_VAR_NAME: &str = "$NUMA_NODE_INDEX";
+
+        struct TestCase {
+            shm_numa_dir_pattern: String,
+            // { numa_node_idx -> shm files count of this numa node }
+            numa_node_files: HashMap<usize, usize>,
+        }
+        let cases = vec![
+            TestCase {
+                shm_numa_dir_pattern: format!("abc/numa_{}", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(0, 4), (1, 0), (3, 2)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("abc/123/numa_{}", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(0, 4), (1, 0), (3, 2)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("abc/123/nu_{}_ma", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(0, 4), (1, 0), (3, 2)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("abc/123/nu_{}_ma/546", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(0, 4), (1, 0), (3, 2)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("abc/123/中{}文", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(0, 4), (1, 0), (3, 2)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("/abc/123/nu_{}_ma/546/", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(0, 4), (1, 2), (2, 3), (3, 2)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("///abc/123/nu_{}_ma/546///", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(0, 0), (1, 0), (2, 0), (3, 0)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("abc/123/nu_{}_ma/546", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: vec![(3, 0)].into_iter().collect(),
+            },
+            TestCase {
+                shm_numa_dir_pattern: format!("abc/123/nu_{}_ma/546", NUMA_NODE_IDX_VAR_NAME),
+                numa_node_files: Default::default(),
+            },
+        ];
+
+        for c in cases {
+            let tempdir = tempfile::tempdir().expect("Failed to create tempdir");
+
+            let numa_node_num = *c.numa_node_files.keys().max().unwrap_or(&0) + 1;
+            let mut expected_numa_shm_files = vec![vec![]; numa_node_num];
+            for (numa_index, count) in c.numa_node_files {
+                let dir = c.shm_numa_dir_pattern.replacen(
+                    NUMA_NODE_IDX_VAR_NAME,
+                    numa_index.to_string().as_str(),
+                    1,
+                );
+                expected_numa_shm_files[numa_index] =
+                    generated_random_files(tempdir.path().join(dir.trim_matches('/')), count);
+            }
+            if expected_numa_shm_files.iter().all(Vec::is_empty) {
+                expected_numa_shm_files = Vec::new();
+            }
+
+            let p =
+                ShmNumaDirPattern::new(&c.shm_numa_dir_pattern, tempdir.path().to_str().unwrap());
+            let mut actually_numa_shm_files =
+                scan_shm_files(&p).expect("scan shm files must be ok");
+            actually_numa_shm_files
+                .iter_mut()
+                .for_each(|files| files.sort());
+
+            assert_eq!(expected_numa_shm_files, actually_numa_shm_files);
+        }
+    }
+
+    fn generated_random_files(dir: impl AsRef<Path>, count: usize) -> Vec<PathBuf> {
+        fn filename_fn(rng: &mut ThreadRng) -> String {
+            let len = rng.gen_range(1..=30);
+            repeat(())
+                .map(|()| rng.sample(Alphanumeric))
+                .map(char::from)
+                .take(len)
+                .collect()
+        }
+
+        let mut rng = rand::thread_rng();
+        let dir = dir.as_ref();
+        fs::create_dir_all(dir).expect("Failed to create dir");
+
+        let mut files: Vec<PathBuf> = (0..count)
+            .map(|_| {
+                let filename = filename_fn(&mut rng);
+                let p = dir.join(filename);
+                let mut data = vec![0; rng.gen_range(0..100)];
+                rng.fill(data.as_mut_slice());
+                fs::write(&p, &data).expect("Failed to write random data");
+                p
+            })
+            .collect();
+
+        files.sort();
+        files
+    }
 }
