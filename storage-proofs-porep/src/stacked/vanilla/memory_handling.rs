@@ -405,13 +405,13 @@ fn numa_pool() -> &'static shm::NumaPool {
 /// In the above example, the following shared memory files will be matched.
 ///
 /// NUMA node 0:
-/// /dev/shm/filecoin-proof-label/numa_0/MEM_32G_1
-/// /dev/shm/filecoin-proof-label/numa_0/MEM_64G_1
-/// /dev/shm/filecoin-proof-label/numa_0/ANY_FILE_NAME
+/// /dev/shm/filecoin-proof-label/numa_0/mem_32GiB_1
+/// /dev/shm/filecoin-proof-label/numa_0/mem_64GiB_1
+/// /dev/shm/filecoin-proof-label/numa_0/any_file_name
 /// NUMA node 1:
-/// /dev/shm/filecoin-proof-label/numa_1/MEM_32G_1
-/// /dev/shm/filecoin-proof-label/numa_1/MEM_64G_1
-/// /dev/shm/filecoin-proof-label/numa_1/ANY_FILE_NAME
+/// /dev/shm/filecoin-proof-label/numa_1/mem_32GiB_1
+/// /dev/shm/filecoin-proof-label/numa_1/mem_64GiB_1
+/// /dev/shm/filecoin-proof-label/numa_1/any_file_name
 /// NUMA node N:
 /// ...
 fn scan_shm_files(shm_numa_dir_pattern: &ShmNumaDirPattern<'_>) -> Result<Vec<Vec<PathBuf>>> {

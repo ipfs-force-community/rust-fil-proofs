@@ -99,12 +99,13 @@ impl NumaPool {
         shm_pool
     }
 
-    /// Acquire the shm memory for the specified size in the specified numa node
+    /// Acquire the shm memory for the specified size
     ///
-    /// Make sure that the thread calling this function and the thread that using
-    /// the memory returned by this function are in the same numa node and make sure
-    /// the thread that using the returned memory will not be dispatched to other numa nodes,
-    /// otherwise the performance of using returned memory will be very low
+    /// Acquire returns the memory of the NUMA node where the caller thread is located.
+    /// Make sure that the caller thread and the thread that using the memory returned 
+    /// by this function are in the same NUMA node and make sure the thread that using 
+    /// the returned memory will not be dispatched to other NUMA nodes, otherwise the 
+    /// performance of using returned memory will be very low
     pub fn acquire(&self, size: usize) -> Option<MutexGuard<'_, MmapMut>> {
         let numa_group = self
             .numa_groups
