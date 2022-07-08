@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_scan_shm_files() {
-        const NUMA_NODE_IDX_VAR_NAME: &'static str = ShmNumaDirPattern::NUMA_NODE_IDX_VAR_NAME;
+        const NUMA_NODE_IDX_VAR_NAME: &str = ShmNumaDirPattern::NUMA_NODE_IDX_VAR_NAME;
 
         struct TestCase {
             shm_numa_dir_pattern: String,
