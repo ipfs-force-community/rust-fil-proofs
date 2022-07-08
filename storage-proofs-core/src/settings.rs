@@ -114,7 +114,7 @@ impl Settings {
 pub struct ShmNumaDirPattern(String);
 
 impl ShmNumaDirPattern {
-    const NUMA_NODE_IDX_VAR_NAME: &'static str = "$NUMA_NODE_INDEX";
+    pub const NUMA_NODE_IDX_VAR_NAME: &'static str = "$NUMA_NODE_INDEX";
 
     pub fn new(pattern: &str, prefix: &str) -> Self {
         Self(format!(
