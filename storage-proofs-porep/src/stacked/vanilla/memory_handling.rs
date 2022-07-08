@@ -473,8 +473,8 @@ mod tests {
 
     #[test]
     fn test_scan_shm_files() {
-        const NUMA_NODE_IDX_VAR_NAME: &str = "$NUMA_NODE_INDEX";
-
+        const NUMA_NODE_IDX_VAR_NAME: &'static str = ShmNumaDirPattern::NUMA_NODE_IDX_VAR_NAME;
+        
         struct TestCase {
             shm_numa_dir_pattern: String,
             // { numa_node_idx -> shm files count of this numa node }
