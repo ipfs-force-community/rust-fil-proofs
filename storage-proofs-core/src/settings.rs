@@ -30,7 +30,6 @@ pub struct Settings {
     pub multicore_sdr_producers: usize,
     pub multicore_sdr_producer_stride: u64,
     pub multicore_sdr_lookahead: usize,
-    pub multicore_sdr_shm_numa_dir_pattern: String,
 }
 
 impl Default for Settings {
@@ -55,10 +54,6 @@ impl Default for Settings {
             multicore_sdr_producers: 3,
             multicore_sdr_producer_stride: 128,
             multicore_sdr_lookahead: 800,
-            multicore_sdr_shm_numa_dir_pattern: format!(
-                "filecoin-proof-label/numa_{}",
-                ShmNumaDirPattern::NUMA_NODE_IDX_VAR_NAME
-            ),
         }
     }
 }
@@ -103,64 +98,5 @@ impl Settings {
         s.merge(Environment::with_prefix(PREFIX))?;
 
         s.try_into()
-    }
-
-    pub fn multicore_sdr_shm_numa_dir_pattern(&self, prefix: &str) -> ShmNumaDirPattern {
-        ShmNumaDirPattern::new(&self.multicore_sdr_shm_numa_dir_pattern, prefix)
-    }
-}
-
-/// The shared memory directory pattern
-pub struct ShmNumaDirPattern(String);
-
-impl ShmNumaDirPattern {
-    pub const NUMA_NODE_IDX_VAR_NAME: &'static str = "$NUMA_NODE_INDEX";
-
-    pub fn new(pattern: &str, prefix: &str) -> Self {
-        Self(format!(
-            "{}/{}",
-            prefix.trim_end_matches('/'),
-            glob::Pattern::escape(pattern.trim_matches('/')),
-        ))
-    }
-
-    /// Converts to glob pattern
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_proofs_core::settings::ShmNumaDirPattern;
-    ///
-    /// let p = ShmNumaDirPattern::new("abc/numa_$NUMA_NODE_INDEX", "/dev/shm");
-    /// assert_eq!(p.to_glob_pattern(), String::from("/dev/shm/abc/numa_*/*"));
-    ///
-    /// let p = ShmNumaDirPattern::new("abc/nu_$NUMA_NODE_INDEX_ma", "/dev/shm");
-    /// assert_eq!(p.to_glob_pattern(), String::from("/dev/shm/abc/nu_*_ma/*"));
-    /// ```
-    pub fn to_glob_pattern(&self) -> String {
-        format!(
-            "{}/*",
-            self.0.replacen(Self::NUMA_NODE_IDX_VAR_NAME, "*", 1)
-        )
-    }
-
-    /// Converts to regex pattern
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use storage_proofs_core::settings::ShmNumaDirPattern;
-    ///
-    /// let p = ShmNumaDirPattern::new("abc/numa_$NUMA_NODE_INDEX", "/dev/shm");
-    /// assert_eq!(p.to_regex_pattern(), String::from(r"/dev/shm/abc/numa_(\d+)/.+"));
-    ///
-    /// let p = ShmNumaDirPattern::new("abc/nu_$NUMA_NODE_INDEX_ma", "/dev/shm");
-    /// assert_eq!(p.to_regex_pattern(), String::from(r"/dev/shm/abc/nu_(\d+)_ma/.+"));
-    /// ```
-    pub fn to_regex_pattern(&self) -> String {
-        format!(
-            "{}/.+",
-            self.0.replacen(Self::NUMA_NODE_IDX_VAR_NAME, "(\\d+)", 1)
-        )
     }
 }
