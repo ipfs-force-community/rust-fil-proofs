@@ -5,49 +5,79 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use log::{info, warn};
+use log::{trace, warn};
 use mapr::{MmapMut, MmapOptions};
 
 use crate::stacked::vanilla::numa::NumaNodeIndex;
 
 // memory_size -> memory
-type ShmPool = HashMap<usize, Vec<Mutex<MmapMut>>>;
+type InnerPool = HashMap<usize, Vec<Mutex<MmapMut>>>;
 
-pub(super) struct NumaPool {
+pub(super) struct NumaMemPool {
     /// The index of the numa_groups vec is numa_node_index
-    numa_groups: Vec<ShmPool>,
+    numa_groups: Vec<InnerPool>,
 }
 
-impl NumaPool {
-    /// Create an empty NumaPoll
-    pub fn empty() -> Self {
+impl NumaMemPool {
+    /// Create an empty NumaMemPool
+    pub const fn empty() -> Self {
         Self {
             numa_groups: Vec::new(),
         }
     }
 
-    /// Create NumaPool with the given numa_shm_files
+    /// Create NumaMemPool with the given `numa_memory_files`
     ///
-    /// The index of the numa_shm_files vec is numa_node_index,
-    /// and each item of numa_shm_files is the shm file paths corresponding to numa_node_index
-    pub fn new(numa_shm_files: Vec<impl IntoIterator<Item = impl AsRef<Path>>>) -> Self {
-        let numa_groups = numa_shm_files
-            .into_iter()
-            .map(Self::load_shm_files)
-            .collect();
-        Self { numa_groups }
+    /// The index of the `numa_memory_files` vec is numa_node_index,
+    /// and each item of `numa_memory_files` is the memory file paths corresponding to numa_node_index
+    #[allow(dead_code)]
+    pub fn new(numa_memory_files: Vec<impl IntoIterator<Item = impl AsRef<Path>>>) -> Self {
+        let mut numa_mem_pool = Self::empty();
+        numa_mem_pool.init(numa_memory_files);
+        numa_mem_pool
     }
 
-    fn load_shm_files(shm_files: impl IntoIterator<Item = impl AsRef<Path>>) -> ShmPool {
-        let mut shm_pool: HashMap<usize, Vec<Mutex<MmapMut>>> = HashMap::new();
+    /// Init NumaMemPool with the given `numa_memory_files`
+    ///
+    /// The index of the `numa_memory_files` vec is numa_node_index,
+    /// and each item of `numa_memory_files` is the memory file paths corresponding to numa_node_index
+    pub fn init(&mut self, numa_memory_files: Vec<impl IntoIterator<Item = impl AsRef<Path>>>) {
+        if !self.numa_groups.is_empty() {
+            warn!("The numa pool has already been initialized");
+            return;
+        }
+        let numa_groups: Vec<_> = numa_memory_files
+            .into_iter()
+            .map(Self::load_memory_files)
+            .collect();
+        trace!(
+            "number of loaded memory files: {}",
+            numa_groups
+                .iter()
+                .enumerate()
+                .map(|(numa_id, mems)| {
+                    format!(
+                        "numa_id: {}, loaded: {}",
+                        numa_id,
+                        mems.values().map(Vec::len).sum::<usize>()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        self.numa_groups = numa_groups;
+    }
 
-        for p in shm_files.into_iter() {
+    fn load_memory_files(memory_files: impl IntoIterator<Item = impl AsRef<Path>>) -> InnerPool {
+        let mut inner_pool: HashMap<usize, Vec<Mutex<MmapMut>>> = HashMap::new();
+
+        for p in memory_files.into_iter() {
             let p = p.as_ref();
-            let shm_file = match OpenOptions::new().read(true).write(true).open(p) {
+            let memory_file = match OpenOptions::new().read(true).write(true).open(p) {
                 Ok(file) => file,
                 Err(e) => {
                     warn!(
-                        "open shm file: '{}', {:?}. ignore this shm file.",
+                        "open memory file: '{}', {:?}. ignore this memory file.",
                         p.display(),
                         e
                     );
@@ -55,11 +85,11 @@ impl NumaPool {
                 }
             };
 
-            let file_size = match shm_file.metadata() {
+            let file_size = match memory_file.metadata() {
                 Ok(meta) => meta.len(),
                 Err(e) => {
                     warn!(
-                        "get the size of the '{}' file: {:?}. ignore this shm file.",
+                        "get the size of the '{}' file: {:?}. ignore this memory file.",
                         p.display(),
                         e,
                     );
@@ -67,20 +97,20 @@ impl NumaPool {
                 }
             };
 
-            let mmap = match unsafe { MmapOptions::new().lock().map_mut(&shm_file) } {
+            let mmap = match unsafe { MmapOptions::new().lock().map_mut(&memory_file) } {
                 Ok(mmap) => mmap,
                 Err(e) => {
                     // fallback to not locked if permissions are not available
                     warn!(
-                        "lock mmap shm file '{}': {:?}. falling back",
+                        "lock mmap memory file '{}': {:?}. falling back",
                         p.display(),
                         e
                     );
-                    match unsafe { MmapOptions::new().map_mut(&shm_file) } {
+                    match unsafe { MmapOptions::new().map_mut(&memory_file) } {
                         Ok(mmap) => mmap,
                         Err(e) => {
                             warn!(
-                                "mmap shm file '{}': {:?}. ignore this shm file.",
+                                "mmap memory file '{}': {:?}. ignore this memory file.",
                                 p.display(),
                                 e
                             );
@@ -89,24 +119,24 @@ impl NumaPool {
                     }
                 }
             };
-            info!("loaded shm file: {}", p.display());
+            trace!("loaded memory file: {}", p.display());
             let mmap = Mutex::new(mmap);
-            shm_pool
+            inner_pool
                 .entry(file_size as usize)
                 .or_insert_with(Vec::new)
                 .push(mmap);
         }
-        shm_pool
+        inner_pool
     }
 
-    /// Acquire the shm memory for the specified size
+    /// Acquire the memory for the specified size
     ///
-    /// Acquire returns the shared memory of the NUMA node where the caller thread is located 
-    /// if there is enough shared memory.
+    /// Acquire returns the memory of the NUMA node where the caller thread is located
+    /// if there is enough memory.
     /// Make sure that the caller thread and the thread that using the memory returned
     /// by this function are in the same NUMA node and make sure the thread that using
-    /// the returned memory will not be dispatched to other NUMA nodes, otherwise the
-    /// performance of using returned memory will be very low
+    /// the returned memory will not be dispatched to other NUMA nodes, To maintain high
+    /// performance of memory access
     pub fn acquire(&self, size: usize) -> Option<MutexGuard<'_, MmapMut>> {
         let numa_group = self
             .numa_groups
@@ -141,7 +171,7 @@ mod tests {
 
     use crate::stacked::vanilla::numa::NumaNodeIndex;
 
-    use super::NumaPool;
+    use super::NumaMemPool;
 
     lazy_static! {
         pub(super) static ref CUR_NUMA_NODE: Mutex<Option<NumaNodeIndex>> = Mutex::new(None);
@@ -153,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn test_numa_pool() {
+    fn test_numa_mem_pool() {
         let temp_dir = tempfile::tempdir().expect("Failed to create tempdir");
         let temp_dir_path = temp_dir.as_ref();
 
@@ -161,7 +191,7 @@ mod tests {
             (numa_node_idx + 1) * 10
         }
 
-        let numa_shm_files: Vec<_> = (0..2)
+        let numa_memory_files: Vec<_> = (0..2)
             .map(|numa_node_idx| {
                 (0..2).map(move |i| {
                     let path = temp_dir_path.join(format!("numa_{}_{}", numa_node_idx, i));
@@ -172,7 +202,7 @@ mod tests {
                 })
             })
             .collect();
-        let numa_pool = NumaPool::new(numa_shm_files);
+        let numa_mem_pool = NumaMemPool::new(numa_memory_files);
 
         let mut mems = Vec::new();
         for numa_node_idx in 0..2 {
@@ -183,27 +213,27 @@ mod tests {
 
             for _ in 0..2 {
                 // Test for normal memory acquire
-                let mem = numa_pool.acquire(size);
+                let mem = numa_mem_pool.acquire(size);
                 assert!(mem.is_some());
                 mems.push(mem);
 
-                // Test to acquire the shared memory of non-existent memory size
+                // Test to acquire the memory of non-existent memory size
                 assert!(
-                    numa_pool.acquire(no_exist_size).is_none(),
+                    numa_mem_pool.acquire(no_exist_size).is_none(),
                     "acquire non-existent memory size should return None"
                 );
             }
         }
 
-        // Test when NumaPool is empty
+        // Test when NumaMemPool is empty
         for numa_node_idx in 0..2 {
             let size = size_fn(numa_node_idx);
             set_current_numa_node(Some(NumaNodeIndex::new(numa_node_idx as u32)));
 
             for _ in 0..2 {
                 assert!(
-                    numa_pool.acquire(size).is_none(),
-                    "acquire memory from empty NumaPool should return None"
+                    numa_mem_pool.acquire(size).is_none(),
+                    "acquire memory from empty NumaMemPool should return None"
                 );
             }
         }
@@ -216,7 +246,7 @@ mod tests {
 
             for _ in 0..2 {
                 // Test for normal memory acquire
-                let mem = numa_pool.acquire(size);
+                let mem = numa_mem_pool.acquire(size);
                 assert!(mem.is_some());
             }
         }
