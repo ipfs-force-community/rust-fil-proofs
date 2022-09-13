@@ -383,10 +383,13 @@ where
 {
     const DEFAULT_BUF_SIZE: usize = 64 * 1024 * 1024;
     let padded_bytes_amount: usize = ensure_piece_size(piece_size)?.into();
-    let buf_size = match padded_bytes_amount {
-        x if x >= DEFAULT_BUF_SIZE => DEFAULT_BUF_SIZE,
-        x => x,
+
+    let buf_size = if padded_bytes_amount >= DEFAULT_BUF_SIZE {
+        DEFAULT_BUF_SIZE
+    } else {
+        padded_bytes_amount
     };
+
     let source = BufReader::with_capacity(buf_size, source);
     let target = BufWriter::with_capacity(buf_size, target);
     add_piece_raw(source, target, piece_size, piece_lengths)

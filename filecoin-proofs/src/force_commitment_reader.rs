@@ -30,17 +30,12 @@ impl ChunkTree {
     fn new(chunk_len: usize) -> Self {
         debug_assert!(chunk_len.is_power_of_two());
 
-        let mut leaf_nodes = Vec::with_capacity(chunk_len);
-        unsafe {
-            leaf_nodes.set_len(chunk_len);
-        }
-
-        let par_chunk_size = 1.max(chunk_len / align_to(rayon::current_num_threads(), 2));
+        let leaf_nodes = vec![Default::default(); chunk_len];
 
         Self {
             leaf_nodes: leaf_nodes.into_boxed_slice(),
             leaf_nodes_len: 0,
-            par_chunk_size,
+            par_chunk_size: 1.max(chunk_len / align_to(rayon::current_num_threads(), 2)),
             chunk_roots: Vec::new(),
         }
     }
@@ -101,6 +96,8 @@ fn par_compute_root(par_chunk_size: usize, row: &mut [PieceHashDomain]) -> Piece
     compute_root(&mut res)
 }
 
+/// Computes slice root hash
+/// Note: For the purpose of reusing memory, this function will change the content of the `row`
 fn compute_root(mut row: &mut [PieceHashDomain]) -> PieceHashDomain {
     #[inline]
     fn compute_next_row(row: &mut [PieceHashDomain]) -> &mut [PieceHashDomain] {
