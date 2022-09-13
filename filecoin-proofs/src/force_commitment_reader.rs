@@ -49,7 +49,7 @@ impl ChunkTree {
         let domain = <DefaultPieceHasher as Hasher>::Function::hash(buf);
         self.leaf_nodes[self.leaf_nodes_len] = domain;
         self.leaf_nodes_len += 1;
-        self.try_compute_chunk_roots();
+        self.try_compute_chunk_root();
     }
 
     #[inline]
@@ -72,12 +72,12 @@ impl ChunkTree {
                 *slot = <DefaultPieceHasher as Hasher>::Function::hash(chunk)
             });
 
-        self.try_compute_chunk_roots();
+        self.try_compute_chunk_root();
 
         self.try_hash_many(&buf[PIECE_HASH_SIZE * len..]);
     }
 
-    fn try_compute_chunk_roots(&mut self) {
+    fn try_compute_chunk_root(&mut self) {
         if self.leaf_nodes_len < self.leaf_nodes.len() {
             return;
         }
