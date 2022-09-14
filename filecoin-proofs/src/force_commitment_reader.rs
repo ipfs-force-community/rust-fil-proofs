@@ -19,6 +19,10 @@ const fn align_down_to(size: usize, align: usize) -> usize {
     size & !(align - 1)
 }
 
+const fn align_down_to_pow2(x: usize) -> usize {
+    (usize::MAX >> (x.leading_zeros() + 1)) + 1
+}
+
 struct ChunkTree {
     leaf_nodes: Box<[PieceHashDomain]>,
     leaf_nodes_len: usize,
@@ -35,7 +39,7 @@ impl ChunkTree {
         Self {
             leaf_nodes: leaf_nodes.into_boxed_slice(),
             leaf_nodes_len: 0,
-            par_chunk_size: 1.max(chunk_len / align_to(rayon::current_num_threads(), 2)),
+            par_chunk_size: align_down_to_pow2(2.max(chunk_len / rayon::current_num_threads())),
             chunk_roots: Vec::new(),
         }
     }
@@ -288,6 +292,21 @@ mod tests {
 
         for (size, align, expect) in cases {
             assert_eq!(align_down_to(size, align), expect);
+        }
+    }
+
+    #[test]
+    fn test_align_down_to_pow2() {
+        let cases = vec![
+            (1024, 1024),
+            (1025, 1024),
+            (2047, 1024),
+            (2049, 2048),
+            (3, 2),
+        ];
+
+        for (size, expect) in cases {
+            assert_eq!(align_down_to_pow2(size), expect);
         }
     }
 }
