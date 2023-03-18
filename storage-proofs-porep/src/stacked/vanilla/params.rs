@@ -763,13 +763,13 @@ pub fn generate_replica_id<H: Hasher, T: AsRef<[u8]>>(
     comm_d: T,
     porep_seed: &[u8; 32],
 ) -> H::Domain {
-    let hash = Sha256::new()
-        .chain(prover_id)
-        .chain(&sector_id.to_be_bytes()[..])
-        .chain(ticket)
-        .chain(AsRef::<[u8]>::as_ref(&comm_d))
-        .chain(porep_seed)
-        .finalize();
+    let mut hash = Sha256::new();
+    hash.update(prover_id);
+    hash.update(&sector_id.to_be_bytes()[..]);
+    hash.update(ticket);
+    hash.update(AsRef::<[u8]>::as_ref(&comm_d));
+    hash.update(porep_seed);
+    let hash = hash.finalize();
 
     bytes_into_fr_repr_safe(hash.as_ref()).into()
 }

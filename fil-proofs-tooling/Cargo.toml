@@ -11,7 +11,7 @@ readme = "README.md"
 
 [dependencies]
 storage-proofs-core = { path = "../storage-proofs-core", version = "~11.1.0", default-features = false}
-storage-proofs-porep = { path = "../storage-proofs-porep", version = "~11.1.0", default-features = false }
+storage-proofs-porep = { path = "../storage-proofs-porep", version = "~11.1.0", default-features = false, features = ["multicore-sdr"] }
 storage-proofs-post = { path = "../storage-proofs-post", version = "~11.1.0", default-features = false }
 storage-proofs-update = { path = "../storage-proofs-update", version = "~11.1.0", default-features = false }
 filecoin-proofs = { path = "../filecoin-proofs", version = "~11.1.0", default-features = false }
@@ -53,6 +53,11 @@ dialoguer = "0.8.0"
 structopt = "0.3.12"
 humansize = "1.1.0"
 blstrs = "0.4.0"
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "time",
+    "local-time",
+] }
 
 [features]
 default = ["opencl", "measurements"]

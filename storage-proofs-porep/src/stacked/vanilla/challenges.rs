@@ -49,12 +49,12 @@ impl LayerChallenges {
         (0..challenges_count)
             .map(|i| {
                 let j: u32 = ((challenges_count * k as usize) + i) as u32;
-
-                let hash = Sha256::new()
-                    .chain(replica_id.into_bytes())
-                    .chain(seed)
-                    .chain(&j.to_le_bytes())
-                    .finalize();
+                
+                let mut hash = Sha256::new();
+                hash.update(replica_id.into_bytes());
+                hash.update(seed);
+                hash.update(&j.to_le_bytes());
+                let hash = hash.finalize();
 
                 let big_challenge = BigUint::from_bytes_le(hash.as_ref());
 

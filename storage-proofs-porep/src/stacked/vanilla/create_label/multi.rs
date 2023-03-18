@@ -1,4 +1,6 @@
 use std::convert::TryInto;
+use std::fs::File;
+use std::io::Write;
 use std::marker::PhantomData;
 use std::mem::{self, size_of};
 use std::sync::{
@@ -17,6 +19,7 @@ use generic_array::{
 };
 use log::{debug, info};
 use merkletree::store::{DiskStore, Store, StoreConfig};
+use pprof::protos::Message;
 use storage_proofs_core::{
     cache_key::CacheKey,
     drgraph::{Graph, BASE_DEGREE},
@@ -442,6 +445,7 @@ pub fn create_labels_for_encoding<Tree: 'static + MerkleTreeTrait, T: AsRef<[u8]
     config: StoreConfig,
 ) -> Result<(Labels<Tree>, Vec<LayerState>)> {
     info!("create labels");
+    // let guard = pprof::ProfilerGuardBuilder::default().frequency(1000).blocklist(&["libc", "libgcc", "pthread", "vdso"]).build().unwrap();
 
     let layer_states = prepare_layers::<Tree>(graph, &config, layers);
 
@@ -519,6 +523,12 @@ pub fn create_labels_for_encoding<Tree: 'static + MerkleTreeTrait, T: AsRef<[u8]
             );
         }
     }
+
+    // if let Ok(report) = guard.report().build() {
+    //     let file = File::create("flamegraph.svg").unwrap();
+    //     report.flamegraph(file).unwrap();
+    // };
+    
 
     Ok((
         Labels::<Tree> {

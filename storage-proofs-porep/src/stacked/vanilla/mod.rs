@@ -30,6 +30,6 @@ pub use column_proof::ColumnProof;
 pub use encoding_proof::EncodingProof;
 pub use graph::{StackedBucketGraph, StackedGraph, EXP_DEGREE};
 pub use labeling_proof::LabelingProof;
-pub use memory_handling::init_numa_mem_pool;
+// pub use memory_handling::init_numa_mem_pool;
 pub use params::*;
 pub use proof::{StackedDrg, TreeRElementData, TOTAL_PARENTS};

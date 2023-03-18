@@ -2,6 +2,7 @@
 //#![warn(clippy::unwrap_used)]
 
 use std::io::{stdin, stdout};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::Result;
@@ -12,6 +13,7 @@ use storage_proofs_core::api_version::ApiVersion;
 
 use crate::prodbench::ProdbenchInputs;
 
+mod force;
 mod hash_fns;
 mod merkleproofs;
 mod prodbench;
@@ -19,12 +21,23 @@ mod window_post;
 mod winning_post;
 
 fn main() -> Result<()> {
-    fil_logger::init();
+    use anyhow::Context;
+    use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::DEBUG.into())
+                .from_env()
+                .context("env filter")?,
+        )
+        .init();
 
     let window_post_cmd = SubCommand::with_name("window-post")
         .about("Benchmark Window PoST")
         .arg(
-            Arg::with_name("preserve-cache")
+           Arg::with_name("preserve-cache")
                 .long("preserve-cache")
                 .required(false)
                 .help("Preserve the directory where cached files are persisted")
@@ -170,6 +183,23 @@ fn main() -> Result<()> {
                 .takes_value(false),
         );
 
+    let run_pc1_cmd = SubCommand::with_name("run-pc1")
+        .about("create run-pc1")
+        .arg(
+            Arg::with_name("sector_size")
+                .long("sector_size")
+                .required(true)
+                .help("The sector_size (e.g. 2KiB)")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("cache_dir")
+                .long("cache_dir")
+                .required(true)
+                .help("cache_dir")
+                .takes_value(true),
+        );
+
     let matches = App::new("benchy")
         .setting(AppSettings::ArgRequiredElseHelp)
         .version("0.1")
@@ -178,6 +208,7 @@ fn main() -> Result<()> {
         .subcommand(hash_cmd)
         .subcommand(prodbench_cmd)
         .subcommand(merkleproof_cmd)
+        .subcommand(run_pc1_cmd)
         .get_matches();
 
     match matches.subcommand() {
@@ -240,6 +271,12 @@ fn main() -> Result<()> {
 
             serde_json::to_writer(stdout(), &outputs)
                 .expect("failed to write ProdbenchOutput to stdout")
+        }
+        ("run-pc1", Some(m)) => {
+            let sector_size =
+                Byte::from_str(value_t!(m, "sector_size", String)?)?.get_bytes() as u64;
+            let cache_dir = value_t!(m, "cache_dir", PathBuf)?;
+            force::run_pc1(sector_size, cache_dir).expect("failed to run-pc1");
         }
         _ => unreachable!(),
     }
