@@ -46,9 +46,9 @@ fil_logger = "0.1"
 memmap = "0.7"
 
 [target."cfg(target_arch = \"aarch64\")".dependencies]
-sha2 = { git = "https://github.com/0x5459/hashes.git", branch="test", features = ["compress", "asm"] }
+sha2 = { git = "https://github.com/0x5459/hashes.git", branch="master", features = ["compress", "asm"] }
 [target."cfg(not(target_arch = \"aarch64\"))".dependencies]
-sha2 = { git = "https://github.com/0x5459/hashes.git", branch="test", features = ["compress", "asm"] }
+sha2 = { git = "https://github.com/0x5459/hashes.git", branch="master", features = ["compress", "asm"] }
 
 [dev-dependencies]
 tempfile = "3"

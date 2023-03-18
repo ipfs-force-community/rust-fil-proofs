@@ -21,7 +21,7 @@ rand = "0.8.0"
 neptune = { version = "~5.2.0", optional = true, features = ["arity2", "arity4", "arity8", "arity11", "arity16", "arity24", "arity36"] }
 lazy_static = { version = "1.4.0", optional = true }
 blake2s_simd = { version = "0.5.11", optional = true }
-sha2 = { git = "https://github.com/0x5459/hashes.git", branch="test", optional = true }
+sha2 = { git = "https://github.com/0x5459/hashes.git", branch="master", optional = true }
 hex = "0.4.2"
 
 [features]

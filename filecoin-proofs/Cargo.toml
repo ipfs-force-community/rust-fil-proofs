@@ -34,7 +34,7 @@ merkletree = "0.21.0"
 bincode = "1.1.2"
 anyhow = "1.0.23"
 rand_xorshift = "0.3.0"
-sha2 = { git = "https://github.com/0x5459/hashes.git", branch="test" }
+sha2 = { git = "https://github.com/0x5459/hashes.git", branch="master" }
 typenum = "1.11.2"
 gperftools = { version = "0.2", optional = true }
 generic-array = "0.14.4"
