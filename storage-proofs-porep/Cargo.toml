@@ -46,9 +46,9 @@ blstrs = "0.4.0"
 pprof = { version = "0.11", features = ["flamegraph", "protobuf-codec"] }
 
 [target."cfg(target_arch = \"aarch64\")".dependencies]
-sha2 = { version = "0.10.6", features = ["compress", "asm"] }
+sha2 = { git = "https://github.com/0x5459/hashes.git", branch="test", features = ["compress", "asm"] }
 [target."cfg(not(target_arch = \"aarch64\"))".dependencies]
-sha2 = { version = "0.10.6", features = ["compress", "asm"] }
+sha2 = { git = "https://github.com/0x5459/hashes.git", branch="test", features = ["compress", "asm"] }
 
 [dev-dependencies]
 tempfile = "3"
