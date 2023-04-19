@@ -16,7 +16,7 @@ filecoin-hashers = { path = "../filecoin-hashers", version = "~9.0.0", default-f
 rand = "0.8"
 merkletree = "0.22.0"
 byteorder = "1"
-config = { version = "0.12.0", default-features = false, features = ["toml"] }
+config = { version = "0.13.3", default-features = false, features = ["toml"] }
 itertools = "0.10.3"
 lazy_static = "1.2"
 memmap2 = "0.5.6"
