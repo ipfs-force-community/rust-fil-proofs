@@ -11,6 +11,7 @@ type PieceHashDomain = <DefaultPieceHasher as Hasher>::Domain;
 
 const PIECE_HASH_SIZE: usize = mem::size_of::<PieceHashDomain>() * 2;
 
+#[allow(dead_code)]
 const fn align_to(size: usize, align: usize) -> usize {
     (size + (align - 1)) & !(align - 1)
 }
