@@ -174,6 +174,8 @@ fn create_core_units(
         core_count, group_count, group_size, cores_per_unit
     );
 
+    let first_cpu = allowed_cores.first() as usize;
+
     let core_units = (0..unit_count)
         .map(|i| {
             (0..cores_per_unit)
@@ -185,10 +187,9 @@ fn create_core_units(
                     // The index of the core that is bound to a unit.
                     let core_index = (j + i * group_size) % core_count + (round * cores_per_unit);
                     assert!(core_index < core_count);
+                    let idx = core_index + first_cpu;
 
-                    allowed_cores
-                        .is_set(core_index.try_into().ok()?)
-                        .then_some(core_index)
+                    allowed_cores.is_set(idx.try_into().ok()?).then_some(idx)
                 })
                 .collect::<Vec<_>>()
         })
@@ -444,6 +445,49 @@ mod tests {
                 [9, 10, 11],
                 [27, 28, 29],
                 [33, 34, 35],
+            ]
+        );
+
+        let limited = create_core_units(40, 8, 2, &(64..103).collect());
+        assert_eq!(
+            limited,
+            [
+                [64, 65],
+                [69, 70],
+                [74, 75],
+                [79, 80],
+                [84, 85],
+                [89, 90],
+                [94, 95],
+                [99, 100],
+                [66, 67],
+                [71, 72],
+                [76, 77],
+                [81, 82],
+                [86, 87],
+                [91, 92],
+                [96, 97],
+                [101, 102]
+            ]
+        );
+
+        let limited = create_core_units(26, 13, 2, &(64..=103).collect());
+        assert_eq!(
+            limited,
+            [
+                [64, 65],
+                [66, 67],
+                [68, 69],
+                [70, 71],
+                [72, 73],
+                [74, 75],
+                [76, 77],
+                [78, 79],
+                [80, 81],
+                [82, 83],
+                [84, 85],
+                [86, 87],
+                [88, 89]
             ]
         );
     }
