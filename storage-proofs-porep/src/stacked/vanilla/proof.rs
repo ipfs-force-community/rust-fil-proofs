@@ -54,6 +54,33 @@ use crate::{
 
 pub const TOTAL_PARENTS: usize = 37;
 
+extern "C" {
+
+    fn generate_tree_r_last_fpga(
+        data_in: *mut Data<'_>,  
+        nodes_count: usize, 
+        NODE_SIZE: usize,
+        fpga_tree_max_n: usize, 
+        configs: * const Vec<StoreConfig>, 
+        tree_r_last_config: * const StoreConfig, 
+        label_path_ptr: std::ffi::CString
+    );
+    fn generate_tree_c_with_fpga(
+            layers: usize,
+            nodes_count: usize,
+            NODE_SIZE: usize,
+            tree_count: usize,
+            fpga_column_max_n: usize,
+            fpga_tree_max_n: usize,
+            column_write_batch_size: usize,
+            labels_config_ptr: * const Vec<StoreConfig>,
+            configs:* const Vec<StoreConfig>,
+           
+            //labels_config: *const Vec<StoreConfig>,
+    );
+}
+
+
 lazy_static! {
     /// Ensure that only one `TreeBuilder` or `ColumnTreeBuilder` uses the GPU at a time.
     /// Curently, this is accomplished by only instantiating at most one at a time.
@@ -1158,16 +1185,288 @@ impl<'a, Tree: 'static + MerkleTreeTrait, G: 'static + Hasher> StackedDrg<'a, Tr
         })?
         .0;
 
-        Self::transform_and_replicate_layers_inner(
-            graph,
-            layer_challenges,
-            data,
-            data_tree,
-            config,
-            replica_path,
-            labels,
-        )
-        .context("failed to transform")
+        if SETTINGS.use_fpga_tree_builder {
+            Self::transform_and_replicate_layers_inner_fpga(
+                graph,
+                layer_challenges,
+                data,
+                data_tree,
+                config,
+                replica_path,
+                labels,
+            )
+            .context("failed to transform")
+        }else{
+            Self::transform_and_replicate_layers_inner(
+                graph,
+                layer_challenges,
+                data,
+                data_tree,
+                config,
+                replica_path,
+                labels,
+            )
+            .context("failed to transform")
+        }
+    }
+
+    pub(crate) fn transform_and_replicate_layers_inner_fpga(
+        graph: &StackedBucketGraph<Tree::Hasher>,
+        layer_challenges: &LayerChallenges,
+        mut data: Data<'_>,
+        data_tree: Option<BinaryMerkleTree<G>>,
+        config: StoreConfig,
+        replica_path: PathBuf,
+        label_configs: Labels<Tree>,
+    ) -> Result<TransformedLayers<Tree, G>> {
+        trace!("transform_and_replicate_layers");
+        let nodes_count = graph.size();
+
+        assert_eq!(data.len(), nodes_count * NODE_SIZE);
+        trace!("nodes count {}, data len {}", nodes_count, data.len());
+
+        let tree_count = get_base_tree_count::<Tree>();
+        let nodes_count = graph.size() / tree_count;
+
+        // Ensure that the node count will work for binary and oct arities.
+        let binary_arity_valid = is_merkle_tree_size_valid(nodes_count, BINARY_ARITY);
+        let other_arity_valid = is_merkle_tree_size_valid(nodes_count, Tree::Arity::to_usize());
+        trace!(
+            "is_merkle_tree_size_valid({}, BINARY_ARITY) = {}",
+            nodes_count,
+            binary_arity_valid
+        );
+        trace!(
+            "is_merkle_tree_size_valid({}, {}) = {}",
+            nodes_count,
+            Tree::Arity::to_usize(),
+            other_arity_valid
+        );
+        assert!(binary_arity_valid);
+        assert!(other_arity_valid);
+
+        let layers = layer_challenges.layers();
+        assert!(layers > 0);
+
+        // Generate all store configs that we need based on the
+        // cache_path in the specified config.
+        let mut tree_d_config = StoreConfig::from_config(
+            &config,
+            CacheKey::CommDTree.to_string(),
+            Some(get_merkle_tree_len(nodes_count, BINARY_ARITY)?),
+        );
+        tree_d_config.rows_to_discard = default_rows_to_discard(nodes_count, BINARY_ARITY);
+
+        let mut tree_r_last_config = StoreConfig::from_config(
+            &config,
+            CacheKey::CommRLastTree.to_string(),
+            Some(get_merkle_tree_len(nodes_count, Tree::Arity::to_usize())?),
+        );
+
+        // A default 'rows_to_discard' value will be chosen for tree_r_last, unless the user overrides this value via the
+        // environment setting (FIL_PROOFS_ROWS_TO_DISCARD).  If this value is specified, no checking is done on it and it may
+        // result in a broken configuration.  Use with caution.  It must be noted that if/when this unchecked value is passed
+        // through merkle_light, merkle_light now does a check that does not allow us to discard more rows than is possible
+        // to discard.
+        tree_r_last_config.rows_to_discard =
+            default_rows_to_discard(nodes_count, Tree::Arity::to_usize());
+        trace!(
+            "tree_r_last using rows_to_discard={}",
+            tree_r_last_config.rows_to_discard
+        );
+
+        let mut tree_c_config = StoreConfig::from_config(
+            &config,
+            CacheKey::CommCTree.to_string(),
+            Some(get_merkle_tree_len(nodes_count, Tree::Arity::to_usize())?),
+        );
+        tree_c_config.rows_to_discard =
+            default_rows_to_discard(nodes_count, Tree::Arity::to_usize());
+
+        let configs = split_config(tree_c_config.clone(), tree_count)?;
+        let (tree_c_root_tx, tree_c_root_rx) = std::sync::mpsc::channel();
+        let (tree_r_last_root_tx, tree_r_last_root_rx) = std::sync::mpsc::channel();
+        let (tree_d_config_tx, tree_d_config_rx) = std::sync::mpsc::channel();
+        //let mut tree_r_last_root = <Tree::Hasher as storage_proofs_core::hasher::Hasher>::Domain::try_from_bytes(&[0 as u8]).unwrap();
+        //let mut tree_d_root = <G as storage_proofs_core::hasher::Hasher>::Domain::try_from_bytes(&[0 as u8]).unwrap();
+        let mut tree_d_config_clone_0 = tree_d_config.clone();
+        let tree_r_last_config_clone_0 = tree_r_last_config.clone();
+        //let labels =
+        //    LabelsCache::<Tree>::new(&label_configs).context("failed to create labels cache").unwrap();
+
+        let config_len = &label_configs.len();
+        let last_label_config = &label_configs.labels[config_len - 1];
+        let last_label_path = &last_label_config.path;
+        let last_label_id = &last_label_config.id;
+        let labels_config_labels = label_configs.labels.clone();
+
+        rayon::scope(|s| {
+            s.spawn(move |_| {
+                let tree_c_root = match layers {
+                    11 => {
+                        let fpga_column_max_n = SETTINGS.fpga_column_max_n as usize;
+                        let fpga_tree_max_n = SETTINGS.fpga_tree_max_n as usize;
+                        let column_write_batch_size = SETTINGS.column_write_batch_size as usize;
+
+                        let labels_config_ptr = Box::into_raw(Box::new(labels_config_labels));
+                        let configs_ptr = Box::into_raw(Box::new(configs.clone()));
+
+                        unsafe {
+                            generate_tree_c_with_fpga(
+                                layers,
+                                nodes_count,
+                                NODE_SIZE,
+                                tree_count,
+                                fpga_column_max_n,
+                                fpga_tree_max_n,
+                                column_write_batch_size,
+                                labels_config_ptr,
+                                configs_ptr,
+                            );
+                        }
+
+                        unsafe {
+                            let _ = Box::from_raw(labels_config_ptr);
+                            let _ = Box::from_raw(configs_ptr);
+                        }
+
+                        let tree_c = create_disk_tree::<
+                            DiskTree<
+                                Tree::Hasher,
+                                Tree::Arity,
+                                Tree::SubTreeArity,
+                                Tree::TopTreeArity,
+                            >,
+                        >(
+                            configs[0].size.expect("config size failure"), &configs
+                        );
+
+                        tree_c.unwrap().root()
+                    }
+                    _ => panic!("Unsupported column arity"),
+                };
+
+                info!("tree_c done");
+                tree_c_root_tx.send(tree_c_root).unwrap();
+            });
+
+            s.spawn(move |_| {
+                // Build the MerkleTree over the original data (if needed).
+                let tree_d = match data_tree {
+                    Some(t) => {
+                        trace!("using existing original data merkle tree");
+                        assert_eq!(t.len(), 2 * (data.len() / NODE_SIZE) - 1);
+
+                        t
+                    }
+                    None => {
+                        trace!("building merkle tree for the original data");
+                        data.ensure_data().unwrap();
+                        measure_op(Operation::CommD, || {
+                            Self::build_binary_tree::<G>(
+                                data.as_ref(),
+                                tree_d_config_clone_0.clone(),
+                            )
+                        })
+                        .unwrap()
+                    }
+                };
+                tree_d_config_clone_0.size = Some(tree_d.len());
+                assert_eq!(
+                    tree_d_config_clone_0.size.expect("config size failure"),
+                    tree_d.len()
+                );
+                let tree_d_root = tree_d.root();
+                drop(tree_d);
+                tree_d_config_tx.send(tree_d_config_clone_0).unwrap();
+
+                // Encode original data into the last layer.
+                info!("building tree_r_last");
+                let tree_r_last = measure_op(Operation::GenerateTreeRLast, || {
+                    info!("building tree_r_last use fpga");
+                    let fpga_tree_max_n = SETTINGS.fpga_tree_max_n as usize;
+                    let (configs, replica_config) = split_config_and_replica(
+                        tree_r_last_config_clone_0.clone(),
+                        replica_path.clone(),
+                        nodes_count,
+                        tree_count,
+                    )?;
+                    //let last_layer_labels = &labels_clone_0.labels_for_last_layer()?;
+                    //let lable_path_ptr = last_layer_labels.file
+                    let last_label_path_id = StoreConfig::data_path(last_label_path, last_label_id);
+                    //let last_label_path_id = last_label_path.to_str().unwrap().to_owned() + last_label_id;
+                    let last_label_path_cstr =
+                        std::ffi::CString::new(last_label_path_id.to_str().unwrap())
+                            .expect("CString::new failed");
+
+                    let tree_r_last_config_ptr =
+                        Box::into_raw(Box::new(tree_r_last_config_clone_0.clone()));
+                    let configs_ptr = Box::into_raw(Box::new(configs.clone()));
+
+                    unsafe {
+                        generate_tree_r_last_fpga(
+                            &mut data,
+                            nodes_count,
+                            NODE_SIZE,
+                            fpga_tree_max_n,
+                            configs_ptr,
+                            tree_r_last_config_ptr,
+                            last_label_path_cstr,
+                        );
+                    }
+
+                    unsafe {
+                        let _ = Box::from_raw(tree_r_last_config_ptr);
+                        let _ = Box::from_raw(configs_ptr);
+                    }
+                    create_lc_tree::<
+                        LCTree<Tree::Hasher, Tree::Arity, Tree::SubTreeArity, Tree::TopTreeArity>,
+                    >(
+                        tree_r_last_config_clone_0
+                            .clone()
+                            .size
+                            .expect("config size failure"),
+                        &configs,
+                        &replica_config,
+                    )
+                })
+                .unwrap();
+                let _ = data.drop_data();
+                info!("tree_r_last done");
+
+                let tree_r_last_root = tree_r_last.root();
+                drop(tree_r_last);
+                info!("drop tree_r_last ");
+                tree_r_last_root_tx
+                    .send((tree_r_last_root, tree_d_root))
+                    .unwrap();
+                info!("send tree_r_last ");
+            });
+        });
+        let tree_c_root = tree_c_root_rx.recv().unwrap();
+        let (tree_r_last_root, tree_d_root) = tree_r_last_root_rx.recv().unwrap();
+        tree_d_config = tree_d_config_rx.recv().unwrap();
+        // comm_r = H(comm_c || comm_r_last)
+        let comm_r: <Tree::Hasher as Hasher>::Domain =
+            <Tree::Hasher as Hasher>::Function::hash2(&tree_c_root, &tree_r_last_root);
+
+        Ok((
+            Tau {
+                comm_d: tree_d_root,
+                comm_r,
+            },
+            PersistentAux {
+                comm_c: tree_c_root,
+                comm_r_last: tree_r_last_root,
+            },
+            TemporaryAux {
+                labels: label_configs,
+                tree_d_config,
+                tree_r_last_config,
+                tree_c_config,
+                _g: PhantomData,
+            },
+        ))
     }
 
     pub(crate) fn transform_and_replicate_layers_inner(
@@ -1387,16 +1686,27 @@ impl<'a, Tree: 'static + MerkleTreeTrait, G: 'static + Hasher> StackedDrg<'a, Tr
     )> {
         info!("replicate_phase2");
 
-        let (tau, paux, taux) = Self::transform_and_replicate_layers_inner(
-            &pp.graph,
-            &pp.layer_challenges,
-            data,
-            Some(data_tree),
-            config,
-            replica_path,
-            label_configs,
-        )?;
-
+        let (tau, paux, taux) = if SETTINGS.use_fpga_tree_builder {
+            Self::transform_and_replicate_layers_inner_fpga(
+                &pp.graph,
+                &pp.layer_challenges,
+                data,
+                Some(data_tree),
+                config,
+                replica_path,
+                label_configs,
+            )?
+        } else {
+            Self::transform_and_replicate_layers_inner(
+                &pp.graph,
+                &pp.layer_challenges,
+                data,
+                Some(data_tree),
+                config,
+                replica_path,
+                label_configs,
+            )?
+        };
         Ok((tau, (paux, taux)))
     }
 
