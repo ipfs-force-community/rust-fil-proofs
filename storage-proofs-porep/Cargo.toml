@@ -45,6 +45,9 @@ sha2 = { version = "0.10.2", features = ["compress", "asm"] }
 [target."cfg(not(target_arch = \"aarch64\"))".dependencies]
 sha2 = { version = "0.10.2", features = ["compress"] }
 
+[build-dependencies]
+dunce = "1.0.4"
+
 [dev-dependencies]
 tempfile = "3"
 rand = "0.8"
