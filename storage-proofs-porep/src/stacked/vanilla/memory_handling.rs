@@ -16,6 +16,8 @@ use byte_slice_cast::{AsSliceOf, FromByteSlice};
 use log::{info, trace, warn};
 use memmap2::{Mmap, MmapMut, MmapOptions};
 
+use super::numa::current_numa_node;
+
 mod numa_mem_pool;
 
 pub struct CacheReader<T> {
@@ -343,11 +345,18 @@ impl AsMut<[u8]> for Memory {
 fn allocate_layer(sector_size: usize) -> Result<Memory> {
     Ok(match numa_mem_pool().acquire(sector_size) {
         Some(numa_memory) => {
-            trace!("allocated layer memory from the numa mem pool. memory_size: {}", sector_size);
+            trace!(
+                "allocated layer memory from the numa mem pool. memory_size: {}",
+                sector_size
+            );
             Memory::NumaMemory(numa_memory)
-        },
+        }
         None => {
-            info!("unable to alloc numa memory, falling back. memory_size: {}", sector_size);
+            info!(
+                "unable to alloc numa memory, falling back. memory_size: {}; numa: {:?}",
+                sector_size,
+                current_numa_node()
+            );
             Memory::Normal(normal_allocate_layer(sector_size)?)
         }
     })

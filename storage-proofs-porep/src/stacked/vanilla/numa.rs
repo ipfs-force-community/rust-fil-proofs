@@ -27,6 +27,7 @@ mod linux {
 
     use lazy_static::lazy_static;
     use libc::{self, c_int};
+    use storage_proofs_core::settings::SETTINGS;
 
     use super::NumaNodeIndex;
 
@@ -48,7 +49,7 @@ mod linux {
     /// you need to bind the current worker thread to the specified core when calling this function
     #[allow(dead_code)]
     pub fn current_numa_node() -> Option<NumaNodeIndex> {
-        if !*NUMA_AVAILABLE {
+        if SETTINGS.disable_numa || !*NUMA_AVAILABLE {
             return None;
         }
         let cpu = unsafe { libc::sched_getcpu() };

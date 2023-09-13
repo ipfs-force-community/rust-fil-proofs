@@ -136,15 +136,28 @@ impl NumaMemPool {
     /// the returned memory will not be dispatched to other NUMA nodes, To maintain high
     /// performance of memory access
     pub fn acquire(&self, size: usize) -> Option<MutexGuard<'_, MmapMut>> {
-        let numa_group = self
-            .numa_groups
-            .get(current_numa_node().unwrap_or_default().raw() as usize)?;
-        for l in numa_group.get(&size)? {
-            match l.try_lock() {
-                Ok(m) => return Some(m),
-                Err(_) => {}
+        match current_numa_node() {
+            Some(node) => {
+                let numa_group = self.numa_groups.get(node.raw() as usize)?;
+                for l in numa_group.get(&size)? {
+                    match l.try_lock() {
+                        Ok(m) => return Some(m),
+                        Err(_) => {}
+                    }
+                }
+            }
+            None => {
+                for numa_group in &self.numa_groups {
+                    for l in numa_group.get(&size)? {
+                        match l.try_lock() {
+                            Ok(m) => return Some(m),
+                            Err(_) => {}
+                        }
+                    }
+                }
             }
         }
+
         None
     }
 }
