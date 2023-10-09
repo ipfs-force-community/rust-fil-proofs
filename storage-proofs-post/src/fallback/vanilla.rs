@@ -418,10 +418,21 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                                     pub_params,
                                     challenge_index,
                                 );
-                                let proof = tree.gen_cached_proof(
-                                    challenged_leaf as usize,
-                                    Some(rows_to_discard),
-                                );
+
+                                let proof = match std::panic::catch_unwind(
+                                    std::panic::AssertUnwindSafe(|| {
+                                        tree.gen_cached_proof(
+                                            challenged_leaf as usize,
+                                            Some(rows_to_discard),
+                                        )
+                                    }),
+                                ) {
+                                    Ok(x) => x,
+                                    Err(e) => {
+                                        error!("panic: {:?}, sector_id: {}", e, sector_id);
+                                        std::panic::panic_any(e);
+                                    }
+                                };
 
                                 match proof {
                                     Ok(proof) => {
