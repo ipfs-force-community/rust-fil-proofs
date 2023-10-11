@@ -676,7 +676,18 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
                             return Ok(false);
                         }
 
-                        if !inclusion_proof.validate(challenged_leaf as usize) {
+                        let valid =
+                            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                inclusion_proof.validate(challenged_leaf as usize)
+                            })) {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    error!("panic: {:?}, sector_id: {}", e, sector_id);
+                                    std::panic::panic_any(e);
+                                }
+                            };
+
+                        if !valid {
                             error!("invalid inclusion proof: {:?}", sector_id);
                             return Ok(false);
                         }

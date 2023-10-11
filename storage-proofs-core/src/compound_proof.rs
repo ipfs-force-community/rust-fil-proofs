@@ -1,4 +1,3 @@
-use std::io::Write;
 
 use anyhow::{ensure, Context};
 use bellperson::{
@@ -96,10 +95,6 @@ where
             S::prove_all_partitions(&pub_params.vanilla_params, pub_in, priv_in, partition_count)?;
 
         info!("vanilla_proofs:finish");
-
-        let vanilla_json = serde_json::to_vec(&vanilla_proofs).unwrap();
-        let mut file = std::fs::File::create("/root/vanilla.json").unwrap();
-        file.write_all(&vanilla_json).unwrap();
 
         let sanity_check =
             S::verify_all_partitions(&pub_params.vanilla_params, pub_in, &vanilla_proofs)?;
