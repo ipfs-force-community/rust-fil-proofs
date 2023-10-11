@@ -436,7 +436,19 @@ impl<'a, Tree: 'a + MerkleTreeTrait> ProofScheme<'a> for FallbackPoSt<'a, Tree> 
 
                                 match proof {
                                     Ok(proof) => {
-                                        if proof.validate(challenged_leaf as usize)
+                                        let valid = match std::panic::catch_unwind(
+                                            std::panic::AssertUnwindSafe(|| {
+                                                proof.validate(challenged_leaf as usize)
+                                            }),
+                                        ) {
+                                            Ok(x) => x,
+                                            Err(e) => {
+                                                error!("panic: {:?}, sector_id: {}", e, sector_id);
+                                                std::panic::panic_any(e);
+                                            }
+                                        };
+
+                                        if valid
                                             && proof.root() == priv_sector.comm_r_last
                                             && pub_sector.comm_r
                                                 == <Tree::Hasher as Hasher>::Function::hash2(
