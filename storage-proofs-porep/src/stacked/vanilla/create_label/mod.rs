@@ -63,19 +63,69 @@ pub fn write_layer(data: &[u8], config: &StoreConfig) -> Result<()> {
     if let Some(parent) = data_path.parent() {
         create_dir_all(parent).context("failed to create parent directories")?;
     }
+
+    #[cfg(target_os = "linux")]
+    fn inner(p: impl AsRef<Path>, data: &[u8]) -> io::Result<()> {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(p.as_ref())?;
+        file.write_all(data)
+    }
+
+    #[cfg(target_os = "linux")]
+    inner(&tmp_data_path, data).context("failed to write layer data")?;
+    #[cfg(not(target_os = "linux"))]
     fs::write(&tmp_data_path, data).context("failed to write layer data")?;
     rename(tmp_data_path, data_path).context("failed to rename tmp data")?;
 
     Ok(())
 }
 
+pub fn read_layer(config: &StoreConfig, data: &mut [u8]) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    read_layer_dio(config, data)?;
+    #[cfg(not(target_os = "linux"))]
+    read_layer_normal(config, data)?;
+    Ok(())
+}
+
 /// Reads a layer from disk, into the provided slice.
-pub fn read_layer(config: &StoreConfig, mut data: &mut [u8]) -> Result<()> {
+#[inline]
+pub fn read_layer_normal(config: &StoreConfig, mut data: &mut [u8]) -> Result<()> {
     let data_path = StoreConfig::data_path(&config.path, &config.id);
     let file = File::open(data_path).context("failed to open layer")?;
     let mut buffered = BufReader::new(file);
     io::copy(&mut buffered, &mut data).context("failed to read layer")?;
 
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+/// Reads a layer from disk, into the provided slice.
+#[inline]
+pub fn read_layer_dio(config: &StoreConfig, mut data: &mut [u8]) -> Result<()> {
+    let data_path = StoreConfig::data_path(&config.path, &config.id);
+
+    fn inner(p: impl AsRef<Path>, data: &mut [u8]) -> io::Result<()> {
+        use std::fs::OpenOptions;
+        use std::io::Read;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(p.as_ref())?;
+        file.read_exact(data)
+    }
+
+    inner(&data_path, data).context("failed to read layer")?;
     Ok(())
 }
 
