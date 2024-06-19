@@ -18,6 +18,7 @@ pub mod types;
 
 mod api;
 mod commitment_reader;
+mod force_commitment_reader;
 
 pub use api::*;
 pub use chunk_iter::ChunkIterator;
